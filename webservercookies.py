@@ -5,6 +5,8 @@ from urllib.parse import parse_qsl, urlparse
 import re
 import redis
 import uuid 
+import os
+import urllib.parse
 
 r = redis.Redis(host='localhost', port=6379, db=0)
 
@@ -12,6 +14,10 @@ class WebRequestHandler(BaseHTTPRequestHandler):
     @cached_property
     def url(self):
         return urlparse(self.path)
+    
+    @cached_property
+    def query_data(self):
+        return dict(parse_qsl(self.url.query))
 
     @cached_property
     def cookies(self):
@@ -48,10 +54,15 @@ class WebRequestHandler(BaseHTTPRequestHandler):
         books = r.lrange(session_id, 0, 5)
         print(session_id, books)
         all_books = [str(i+1) for i in range(4)]
-        new = [b for b in all_books if b not in
+        libros_leidos = [b for b in all_books if b not in
                [vb.decode() for vb in books]]
-        if new:
-            return new[0]
+        if len(libros_leidos) != 0:
+           if len(libros_leidos) <3:
+             return libros_leidos[0]
+           else:
+              return "Tiene que haber leído al menos 3 libros para recibir recomendaciones"
+        else:
+           return "No hay recomendaciones disponibles"
 
     def get_book(self, book_id):
         session_id = self.get_book_session()
@@ -64,9 +75,6 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             self.end_headers()
             response = f"""
             {book_page.decode()}
-        <p>  Ruta: {self.path}            </p>
-        <p>  URL: {self.url}              </p>
-        <p>  HEADERS: {self.headers}      </p>
         <p>  SESSION: {session_id}      </p>
         <p>  Recomendación: {book_recomendation}      </p>
 """
@@ -89,11 +97,37 @@ class WebRequestHandler(BaseHTTPRequestHandler):
             match = re.match(pattern, path)
             if match:
                 return (method, match.groupdict())
+            
+    def get_bookWord(self):
+        if self.query_data and 'q' in self.query_data:
+            booksB = r.sinter(self.query_data['q'].split(' '))
+        lista_libros = [b.decode() for b in booksB]
+        for libro in lista_libros:
+            self.get_book(libro)     
+        if len(lista_libros) < len(booksB):
+            self.get_index()
+
+        self.send_response(200)
+        self.send_header('Content-type','text/html')
+        self.end_headers()
+        
+#    def get_response(self,books):
+#        return f"""
+#    <h1> Hola Web </h1>
+#    <form action="/" method = "get">
+#        <label for ="q"> Busqueda </label>
+#        <input type="text" name = "q" required/>
+#    </forms>
+#    <p>  {self.query_data}   </p>
+#    <p>  {books}   </p>
+#
+#"""
 
 
 mapping = [
             (r'^/books/(?P<book_id>\d+)$', 'get_book'),
-            (r'^/$', 'get_index')
+            (r'^/$', 'get_index'),
+            (r'^/busqueda$', 'get_bookWord')
         ]
 
 if __name__ == "__main__":
